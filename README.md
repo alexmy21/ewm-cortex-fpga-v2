@@ -9,9 +9,10 @@ crates it inherits.
 > **v0.3.0 — bridge consumer (intentional break of self-containment).**
 > Unlike `ewm-cortex` v0.2.0, this workspace **does** depend on
 > `ewm-fpga-bridge` by path (`ewm-core`, `ewm-dsl`, `ewm-hostif`,
-> `ewm-modules`). The vendored `hllset-core`/`hllset-materialize` and
-> `cortex-core` are kept as the **golden reference** for bit-exact
-> crosschecks; `ewm-git` stays at the app layer (bridge is store-agnostic).
+> `ewm-modules`, `ewm-sim`) and on the de-vendored `hllset-next-v2`
+> foundation (core/contracts/lut/morphisms/ranks/cid). The vendored
+> `hllset-core`/`hllset-materialize` copies are **gone**; `ewm-git` stays at
+> the app layer (bridge is store-agnostic).
 
 See [`docs/CORTEX_ARCHITECTURE.md`](docs/CORTEX_ARCHITECTURE.md) for the
 architecture and milestone plan (M4-fpga below).
@@ -69,6 +70,8 @@ ewm-cortex-fpga/
 │   │                         # ViewRecord (h, l) with SHA-1 identity
 │   ├── context-tree/         # Merkle tree over HLLSets + per-leaf views —
 │   │                         # the algebraic S(t) of the Noether equation
+│   ├── ewm-app/              # the Noether-loop driver: LLM (stub/ollama) +
+│   │                         # cortex side-car; integration test harness
 │   └── hllset-repro/         # token realm: hand-rolled autograd, char-level
 │                             # transformer, Phase 0-3 harnesses
 └── docs/
@@ -95,6 +98,12 @@ cargo run -p cortex-core -- path/to/text.txt
 
 # M4-fpga — the cortex pipeline over ewm-fpga-bridge (golden modules)
 cargo test -p cortex-fpga                    # bit-exact crosscheck + golden run
+
+# ewm-app — the Noether-loop driver (integration tests + CLI)
+cargo test -p ewm-app                        # §4 integration plan, all green
+cargo run -p ewm-app                         # deterministic stub, memory store
+cargo run -p ewm-app -- --stub "1,2,3;2,3,4" # explicit stub script
+cargo run -p ewm-app -- --ollama deepseek-coder:6.7b --turns 2 --repo /tmp/ewm-app-repo
 
 # G1 — content-addressed evolution store (commit DAG, H(t) view, merge, gc)
 cargo run -p ewm-git

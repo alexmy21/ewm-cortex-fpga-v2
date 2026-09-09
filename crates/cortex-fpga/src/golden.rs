@@ -59,114 +59,257 @@ impl FpgaPipelineResult {
     }
 }
 
-/// Run the cortex pipeline over the golden modules.
-///
-/// - `doc_ids`: one document of encoding ids (the `tid{n}` stream);
-/// - `lut_ids`: the measured LUT ids (registered before this pass);
-/// - `vocab_ids`: the decoder vocabulary (`gate_TF`).
-///
-/// The slice LUT is built from `lut_ids ∪ doc_ids` — the ungated-LUT rule.
+/// One bridge serving many submissions (multi-instance topology, separation
+/// contract §2). The executor holds a single [`ewm_sim::SimModuleDriver`];
+/// every submission carries its own `ModuleGraphSpec`, so tenants (experts)
+/// are isolated by configuration, not by per-tenant state. The bridge keeps
+/// no expert state between commands.
+pub struct BridgeExecutor {
+    driver: ewm_sim::SimModuleDriver,
+}
+
+impl Default for BridgeExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BridgeExecutor {
+    pub fn new() -> Self {
+        Self {
+            driver: ewm_sim::SimModuleDriver::new(),
+        }
+    }
+
+    /// Run the cortex pipeline over the golden modules.
+    ///
+    /// - `doc_ids`: one document of encoding ids (the `tid{n}` stream);
+    /// - `lut_ids`: the measured LUT ids (registered before this pass);
+    /// - `vocab_ids`: the decoder vocabulary (`gate_TF`).
+    ///
+    /// The slice LUT is built from `lut_ids ∪ doc_ids` — the ungated-LUT rule.
+    pub fn run_cortex_pipeline(
+        &mut self,
+        doc_ids: &[TokenId],
+        lut_ids: &[TokenId],
+        vocab_ids: &[TokenId],
+    ) -> Result<FpgaPipelineResult, String> {
+        // The DSL declaration is the single source of truth for the graph shape.
+        let pipeline = cortex_pipeline();
+        assert_eq!(pipeline.nodes().len(), 2);
+        assert_eq!(pipeline.edges().len(), 1);
+
+        // Ungated LUT: register every ingested id before slicing.
+        let mut effective_lut: Vec<TokenId> = lut_ids.to_vec();
+        effective_lut.extend_from_slice(doc_ids);
+        effective_lut.sort_unstable();
+        effective_lut.dedup();
+
+        // Lower the declaration to a wire graph spec and validate it both ways
+        // (defense in depth: the DSL already validated the same invariants).
+        let spec = ModuleGraphSpec {
+            nodes: vec![
+                ModuleNodeSpec {
+                    node: 0,
+                    kind: ModuleKind::Slice,
+                    config: vec![
+                        ("encoding".to_string(), "tid".to_string()),
+                        ("lut_ids".to_string(), csv(&effective_lut)),
+                    ],
+                },
+                ModuleNodeSpec {
+                    node: 1,
+                    kind: ModuleKind::Gate,
+                    config: vec![("lut_ids".to_string(), csv(vocab_ids))],
+                },
+            ],
+            edges: vec![ModuleEdge {
+                from: (0, 0),
+                to: (1, 0),
+            }],
+        };
+        validate_graph(&spec).map_err(|e| e.to_string())?;
+
+        // The bridge is the execution backend: the cortex submits wire commands
+        // to a `ModuleDriver` and drains responses. No module is ever stepped
+        // directly from here (separation contract §5).
+        self.driver
+            .submit(ModuleCommand::Configure { spec })
+            .map_err(|e| e.to_string())?;
+
+        // Document HLLSet: active bit positions under the tid inscription.
+        let mut positions: Vec<u32> = doc_ids
+            .iter()
+            .map(|&id| {
+                let (reg, tz) = token_to_position(&token_in_bytes(id));
+                reg * BITS_PER_REG + tz
+            })
+            .collect();
+        positions.sort_unstable();
+        positions.dedup();
+
+        self.driver
+            .submit(ModuleCommand::Feed {
+                node: 0,
+                port: 0,
+                packet: Packet {
+                    ids: positions,
+                    values: Vec::new(),
+                },
+            })
+            .map_err(|e| e.to_string())?;
+        self.driver
+            .submit(ModuleCommand::Step { node: 0 })
+            .map_err(|e| e.to_string())?;
+        let materialized_ids = take_output(&mut self.driver, 0, 0)?;
+
+        self.driver
+            .submit(ModuleCommand::Feed {
+                node: 1,
+                port: 0,
+                packet: Packet {
+                    ids: materialized_ids.clone(),
+                    values: Vec::new(),
+                },
+            })
+            .map_err(|e| e.to_string())?;
+        self.driver
+            .submit(ModuleCommand::Step { node: 1 })
+            .map_err(|e| e.to_string())?;
+        let restored_ids = take_output(&mut self.driver, 1, 0)?;
+
+        let leaks: Vec<TokenId> = materialized_ids
+            .iter()
+            .copied()
+            .filter(|id| !restored_ids.contains(id))
+            .collect();
+
+        Ok(FpgaPipelineResult {
+            materialized_ids,
+            restored_ids,
+            leaks,
+        })
+    }
+
+    /// Declare the cortex-computed grounding verdict into a one-node
+    /// `GroundModule` graph and run it through the wire executor.
+    ///
+    /// The bridge's `GroundModule` is config-driven (Option A): the cortex
+    /// decides (matrix + report), the bridge passes the declared prior and
+    /// report through verbatim, quantized by `scale`. No matrix lives in the
+    /// bridge.
+    pub fn run_ground_passthrough(
+        &mut self,
+        prior: &[(TokenId, i64)],
+        report: &[GroundReportEntry],
+        scale: i64,
+    ) -> Result<GroundWireResult, String> {
+        if scale <= 0 {
+            return Err(format!("scale must be positive, got {scale}"));
+        }
+
+        let prior_cfg = prior
+            .iter()
+            .map(|(id, weight)| format!("{id}:{weight}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let report_cfg = report
+            .iter()
+            .map(|entry| {
+                format!(
+                    "{}:{}:{}:{}:{}",
+                    entry.id, entry.tau, entry.rho, entry.srho, entry.r_link
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let spec = ModuleGraphSpec {
+            nodes: vec![ModuleNodeSpec {
+                node: 0,
+                kind: ModuleKind::Ground,
+                config: vec![
+                    ("prior".to_string(), prior_cfg),
+                    ("report".to_string(), report_cfg),
+                    ("scale".to_string(), scale.to_string()),
+                ],
+            }],
+            edges: vec![],
+        };
+        validate_graph(&spec).map_err(|e| e.to_string())?;
+
+        self.driver
+            .submit(ModuleCommand::Configure { spec })
+            .map_err(|e| e.to_string())?;
+        // One valid beat: the module emits prior (port 0) + report (port 1).
+        self.driver
+            .submit(ModuleCommand::Feed {
+                node: 0,
+                port: 0,
+                packet: Packet {
+                    ids: Vec::new(),
+                    values: Vec::new(),
+                },
+            })
+            .map_err(|e| e.to_string())?;
+        self.driver
+            .submit(ModuleCommand::Step { node: 0 })
+            .map_err(|e| e.to_string())?;
+
+        let responses = self.driver.drain().map_err(|e| e.to_string())?;
+        let mut prior_packet: Option<Packet> = None;
+        let mut report_packet: Option<Packet> = None;
+        for response in responses {
+            if let ModuleResponse::Output { node: 0, port, packet } = response {
+                match port {
+                    0 => prior_packet = Some(packet),
+                    1 => report_packet = Some(packet),
+                    _ => {}
+                }
+            }
+        }
+
+        let prior = prior_packet.ok_or_else(|| "no prior packet on ground port 0".to_string())?;
+        let report =
+            report_packet.ok_or_else(|| "no report packet on ground port 1".to_string())?;
+
+        Ok(GroundWireResult {
+            prior_ids: prior.ids,
+            prior_values: prior.values,
+            report_ids: report.ids,
+            report_values: report.values,
+        })
+    }
+}
+
+/// One entry of the cortex-declared grounding report (wire config form).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundReportEntry {
+    pub id: TokenId,
+    pub tau: f64,
+    pub rho: f64,
+    pub srho: f64,
+    pub r_link: u64,
+}
+
+/// The verbatim wire output of the bridge's `GroundModule`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroundWireResult {
+    /// Prior ids/weights emitted on output port 0 (verbatim).
+    pub prior_ids: Vec<TokenId>,
+    pub prior_values: Vec<i64>,
+    /// Report ids/values emitted on output port 1 (verbatim, quantized).
+    pub report_ids: Vec<TokenId>,
+    pub report_values: Vec<i64>,
+}
+
+/// Run the cortex pipeline over a fresh bridge executor.
 pub fn run_cortex_pipeline(
     doc_ids: &[TokenId],
     lut_ids: &[TokenId],
     vocab_ids: &[TokenId],
 ) -> Result<FpgaPipelineResult, String> {
-    // The DSL declaration is the single source of truth for the graph shape.
-    let pipeline = cortex_pipeline();
-    assert_eq!(pipeline.nodes().len(), 2);
-    assert_eq!(pipeline.edges().len(), 1);
-
-    // Ungated LUT: register every ingested id before slicing.
-    let mut effective_lut: Vec<TokenId> = lut_ids.to_vec();
-    effective_lut.extend_from_slice(doc_ids);
-    effective_lut.sort_unstable();
-    effective_lut.dedup();
-
-    // Lower the declaration to a wire graph spec and validate it both ways
-    // (defense in depth: the DSL already validated the same invariants).
-    let spec = ModuleGraphSpec {
-        nodes: vec![
-            ModuleNodeSpec {
-                node: 0,
-                kind: ModuleKind::Slice,
-                config: vec![
-                    ("encoding".to_string(), "tid".to_string()),
-                    ("lut_ids".to_string(), csv(&effective_lut)),
-                ],
-            },
-            ModuleNodeSpec {
-                node: 1,
-                kind: ModuleKind::Gate,
-                config: vec![("lut_ids".to_string(), csv(vocab_ids))],
-            },
-        ],
-        edges: vec![ModuleEdge {
-            from: (0, 0),
-            to: (1, 0),
-        }],
-    };
-    validate_graph(&spec).map_err(|e| e.to_string())?;
-
-    // The bridge is the execution backend: the cortex submits wire commands
-    // to a `ModuleDriver` and drains responses. No module is ever stepped
-    // directly from here (separation contract §5).
-    let mut driver = ewm_sim::SimModuleDriver::new();
-    driver
-        .submit(ModuleCommand::Configure { spec })
-        .map_err(|e| e.to_string())?;
-
-    // Document HLLSet: active bit positions under the tid inscription.
-    let mut positions: Vec<u32> = doc_ids
-        .iter()
-        .map(|&id| {
-            let (reg, tz) = token_to_position(&token_in_bytes(id));
-            reg * BITS_PER_REG + tz
-        })
-        .collect();
-    positions.sort_unstable();
-    positions.dedup();
-
-    driver
-        .submit(ModuleCommand::Feed {
-            node: 0,
-            port: 0,
-            packet: Packet {
-                ids: positions,
-                values: Vec::new(),
-            },
-        })
-        .map_err(|e| e.to_string())?;
-    driver
-        .submit(ModuleCommand::Step { node: 0 })
-        .map_err(|e| e.to_string())?;
-    let materialized_ids = take_output(&mut driver, 0, 0)?;
-
-    driver
-        .submit(ModuleCommand::Feed {
-            node: 1,
-            port: 0,
-            packet: Packet {
-                ids: materialized_ids.clone(),
-                values: Vec::new(),
-            },
-        })
-        .map_err(|e| e.to_string())?;
-    driver
-        .submit(ModuleCommand::Step { node: 1 })
-        .map_err(|e| e.to_string())?;
-    let restored_ids = take_output(&mut driver, 1, 0)?;
-
-    let leaks: Vec<TokenId> = materialized_ids
-        .iter()
-        .copied()
-        .filter(|id| !restored_ids.contains(id))
-        .collect();
-
-    Ok(FpgaPipelineResult {
-        materialized_ids,
-        restored_ids,
-        leaks,
-    })
+    BridgeExecutor::new().run_cortex_pipeline(doc_ids, lut_ids, vocab_ids)
 }
 
 /// Drain the bridge driver and take the first output on `(node, port)`.

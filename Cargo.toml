@@ -17,6 +17,7 @@ hllset-repro = { path = "crates/hllset-repro" }
 cortex-fpga = { path = "crates/cortex-fpga" }
 lut-view = { path = "crates/lut-view" }
 context-tree = { path = "crates/context-tree" }
+ewm-app = { path = "crates/ewm-app" }
 
 # ── hllset-next-v2 foundation (de-vendored: the vendored copies are gone) ──
 hllset-core = { path = "../hllset-next-v2/crates/hllset-core" }

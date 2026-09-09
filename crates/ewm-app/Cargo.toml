@@ -1,0 +1,19 @@
+[package]
+name = "ewm-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The Noether-loop driver: an LLM (stub or local) + ewm-cortex-fpga-v2 as the side-car context/memory back-end"
+
+[dependencies]
+# ── app-layer crates (the cortex decides and remembers) ──
+cortex-core = { workspace = true }
+cortex-fpga = { workspace = true }
+ewm-git = { workspace = true }
+context-tree = { workspace = true }
+lut-view = { workspace = true }
+
+# ── structural types + contracts leaf (allowed per ARCHITECTURE_V2 §4) ──
+hllset-core = { workspace = true }
+hllset-contracts = { workspace = true }

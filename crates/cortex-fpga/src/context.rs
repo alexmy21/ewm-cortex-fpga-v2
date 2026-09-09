@@ -17,6 +17,60 @@ use hllset_core::HLLSet;
 use hllset_core::core::content_addr::content_key_from_tokens;
 use lut_view::ViewRecord;
 
+/// The known LUT family of the cortex (ALGEBRAIC_FOUNDATION §1.4): named
+/// nodes, physically isolated. The first increment keeps one node — `main`,
+/// the full known vocabulary, tid-encoded. More nodes (G1/G2/G3, catalog,
+/// gate) are added as named collections without changing the shape.
+///
+/// This wrapper keeps `InLut` (a bridge executor-math type) inside the
+/// bridge-facing app crate: `ewm-app` and other apps see only `LutFamily`.
+#[derive(Clone, Debug, Default)]
+pub struct LutFamily {
+    nodes: Vec<(String, InLut)>,
+}
+
+impl LutFamily {
+    pub fn new() -> Self {
+        Self {
+            nodes: vec![("main".to_string(), InLut::new())],
+        }
+    }
+
+    /// Register every id of a token collection into all known LUT nodes
+    /// (tid encoding — the cortex-side inscription).
+    pub fn observe(&mut self, ids: &[TokenId]) {
+        for &id in ids {
+            let token = token_in_bytes(id);
+            for (_, lut) in &mut self.nodes {
+                lut.insert(token.clone());
+            }
+        }
+    }
+
+    /// The nodes as `(name, lut)` pairs, for the relational-view combinators.
+    pub fn nodes(&self) -> Vec<(&str, &InLut)> {
+        self.nodes
+            .iter()
+            .map(|(name, lut)| (name.as_str(), lut))
+            .collect()
+    }
+
+    /// Build the unified [`cortex_core::Context`] for a working set against
+    /// this LUT family.
+    pub fn unified_context_for(
+        &self,
+        items: &[(&HLLSet, &[TokenId])],
+    ) -> cortex_core::Context {
+        let luts: Vec<(&str, &InLut)> = self.nodes();
+        let items: Vec<(&HLLSet, &[TokenId], &[(&str, &InLut)])> = items
+            .iter()
+            .map(|(hset, ids)| (*hset, *ids, luts.as_slice()))
+            .collect();
+        unified_context_for(&items)
+    }
+}
+
+
 /// The content key `h:<sha1>` of an HLLSet, from its source token ids.
 pub fn h_key(ids: &[TokenId]) -> String {
     let tokens: Vec<Vec<u8>> = ids.iter().map(|&n| token_in_bytes(n)).collect();
@@ -220,6 +274,7 @@ mod tests {
     }
 }
 
+#[cfg(test)]
 fn tid(n: TokenId) -> Vec<u8> {
     token_in_bytes(n)
 }

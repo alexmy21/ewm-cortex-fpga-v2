@@ -95,6 +95,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ewm-app"
+version = "0.3.0"
+dependencies = [
+ "context-tree",
+ "cortex-core",
+ "cortex-fpga",
+ "ewm-git",
+ "hllset-contracts",
+ "hllset-core",
+ "lut-view",
+]
+
+[[package]]
 name = "ewm-core"
 version = "0.1.0"
 dependencies = [

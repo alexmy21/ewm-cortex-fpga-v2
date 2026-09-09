@@ -16,6 +16,9 @@ pub mod golden;
 mod crosscheck;
 
 pub use context::{
-    context_tree_for, full_image, h_key, leaf_for, unified_context_for, view_record,
+    context_tree_for, full_image, h_key, leaf_for, unified_context_for, view_record, LutFamily,
 };
-pub use golden::{cortex_pipeline, run_cortex_pipeline, view_from_tokens, FpgaPipelineResult};
+pub use golden::{
+    cortex_pipeline, run_cortex_pipeline, view_from_tokens, BridgeExecutor, FpgaPipelineResult,
+    GroundReportEntry, GroundWireResult,
+};

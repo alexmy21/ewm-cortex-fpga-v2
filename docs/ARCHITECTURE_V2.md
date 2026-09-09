@@ -162,3 +162,59 @@ Each stage lands green (workspace tests + crosscheck) before the next begins.
   `full_image_tokens`). `cortex-fpga::unified_context_for` builds it from a
   working set. Roles landed (`Role`, `CortexConfig`, `Leader`).
 - Stage 5 (app crate grouping/naming): next.
+
+## Session status (2026-09-09, ewm-app integration session)
+
+NEXT_SESSION.md §5 decisions — **accepted as recommended**:
+
+- **Q1 — LLM order:** deterministic scripted token stream first, then the
+  real local DeepSeek coder (`ollama run deepseek-coder:6.7b`). Both run
+  green through `ewm-app`.
+- **Q2 — where ewm-app lives:** a new binary crate inside
+  `ewm-cortex-fpga-v2` (`crates/ewm-app`), with a lib (driver + token
+  sources) and a CLI. A separate project can be split out at the app-level
+  migration stage.
+- **Q3 — side-car protocol:** async fire-and-forget from the LLM's point of
+  view; the app polls/advances the commit head. A synchronous barrier exists
+  only in the test harness (proven by
+  `side_car_async_llm_never_blocks`).
+- **Q4 — persist frequency:** every turn; a pass that brings no new bits is
+  skipped (same content = same key ⇒ idempotent), so there is no duplicate
+  commit.
+- **Q5 — leader routing:** route-to-all-experts + lattice-join merge, as
+  implemented by `cortex_core::Leader`. TF-weighted routing stays a derived,
+  later increment.
+
+What landed:
+
+- `cortex-fpga` gained `BridgeExecutor` (one `SimModuleDriver` serving many
+  submissions; tenant isolation = a fresh `ModuleGraphSpec` per submission),
+  `run_ground_passthrough` (the cortex-declared prior + τ/ρ report through
+  the bridge's config-driven `GroundModule`, verbatim), and `LutFamily` (the
+  known-LUT family wrapper that keeps `InLut` out of app crates).
+- `crates/ewm-app`: the Noether-loop driver (`CortexApp`). Each turn runs
+  `ingest → S(t) → evolve → persist → advance head`; `S(t)` is the
+  cumulative working set, committed so that `view(repo, head)` and the
+  context tree agree (the `cortex-fpga` Noether-agreement pattern). Recovery
+  is `CortexApp::open` — read the head, dereference the snapshot, rebuild
+  the presentation from commit messages; no replay.
+- Integration tests (all green, in NEXT_SESSION §4 order): smoke loop,
+  recovery (no replay, idempotent), side-car async, multi-instance
+  (1 leader + 2 experts + 1 shared bridge), grounding pass-through,
+  zero-copy (two threads share one store; only CIDs cross), plus explicit
+  dual-encoding and stub-replay tests.
+- Baselines at handoff: `hllset-next-v2` 245, `hllset-fpga-simulator-v2`
+  101, `ewm-fpga-bridge-v2` 59, `ewm-cortex-fpga-v2` **158** (149 + 9 new
+  ewm-app tests).
+
+Open points carried forward:
+
+- The wire `ModuleCommand` has no explicit tenant tag yet; multi-tenant
+  isolation is by per-submission `Configure` (the bridge is stateless
+  between commands). Adding the tag is a wire change
+  (`PROTOCOL_VERSION` bump).
+- Skipped (no-change) turns are not part of the durable pointer; after
+  recovery their token collections are not rebuilt (they are fully covered
+  by committed sketches — a presentation-only limitation).
+- `ewm-git` commits do not yet pin the context-tree root (stage 4's
+  remaining point); the app rebuilds the tree from commit messages.
