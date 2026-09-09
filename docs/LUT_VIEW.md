@@ -245,15 +245,19 @@ Still open:
 5. Subtree aggregates (the full union set at chosen levels) — digests only for
    now.
 
-**Prototype recorded** in
-[`docs/notebooks/17_context_tree_prototype.ipynb`](notebooks/17_context_tree_prototype.ipynb):
-relational views with `(h, l)` provenance, full image as CRDT union, a Merkle
-`ContextTree` over HLLSets with leaf-level views, the algebraic
-`H(t) = (S(t), H(t-1), D, R, N)` (invariants asserted), and the `ewm-git`
-commit link (D/R/N agree between the tree math and `CommitView`).
+**Prototype recorded** in the now-discharged notebook 17 (the legacy
+`ewm-cortex-fpga/docs/notebooks/17_context_tree_prototype.ipynb`; gen2
+discharged all legacy notebooks on 2026-09-07 and will author a new set
+aligned with the gen2 architecture): relational views with `(h, l)`
+provenance, full image as CRDT union, a Merkle `ContextTree` over HLLSets
+with leaf-level views, the algebraic `H(t) = (S(t), H(t-1), D, R, N)`
+(invariants asserted), and the `ewm-git` commit link (D/R/N agree between the
+tree math and `CommitView`).
 
 ## 8. Related documents
 
+- [`ALGEBRAIC_FOUNDATION.md`](ALGEBRAIC_FOUNDATION.md) — the algebraic
+  structure this design instantiates (the paramount synthesis).
 - Bridge `docs/DECISIONS.md` Session 5.2 — two-structure rule, store-agnostic
   bridge, `ewm-cortex-fpga` boundary.
 - Bridge `docs/DECISIONS.md` Session 6.1 — dual-encoding `SliceModule` +

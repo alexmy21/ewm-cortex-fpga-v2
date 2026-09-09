@@ -13,12 +13,14 @@
 //!   dropped (policy-driven forgetting, unlike an append-only LUT).
 
 pub mod hllset_lut;
+pub mod ingest;
 pub mod object;
 pub mod repo;
 pub mod store;
 pub mod view;
 
 pub use hllset_lut::{BitTf, HllsetLut};
+pub use ingest::{IngestOutput, IngestSink, IngestStats, Ingestor};
 pub use object::{Commit, Gx, Object, ObjectId};
 pub use repo::{ContextWarning, GcReport, LatticeState, Repository};
 pub use store::{LooseStore, MemoryStore, ObjectStore, StoreError};

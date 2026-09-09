@@ -74,14 +74,16 @@ ewm-cortex-fpga/
 └── docs/
     ├── PROJECT_STRUCTURE.md                       # crate graph + ownership rules
     ├── CORTEX_ARCHITECTURE.md                     # enhanced hllset-cortex architecture
-    ├── LUT_VIEW.md                                # LUT-view design discussion + v1 contract
+    ├── ALGEBRAIC_FOUNDATION.md                    # the algebraic structure (paramount)
+    ├── LUT_VIEW.md                                # LUT-view design discussion + v1/v2 contract
     ├── HLLSET_K_SPACE_MATH.md                     # theory (partition, adjunction, MoE/ETT §8)
     ├── HLLSET_LUT_TRANSFORMER_ARCHITECTURE.md     # implementation roadmap (Phases 0-4)
-    └── notebooks/
-        ├── 14_hllset_attention_demo.ipynb         # concepts demo (evcxr)
-        ├── 15_e2e_training_testing.ipynb          # train/test on unknown text (evcxr)
-        ├── 16_bridge_lutview_demo.ipynb           # M4-fpga + LUT-view end-to-end (evcxr)
-        └── 17_context_tree_prototype.ipynb        # relational view + HLLSet tree + S(t) (evcxr)
+    └── notebooks/                                 # removed from this project: the gen2
+                                                   # notebook set lives in
+                                                   # hllset-next-v2/_DOCS/notebooks/ (01-05,
+                                                   # executed green). This project is synced
+                                                   # with the updated foundation in a later
+                                                   # phase of the collection roadmap.
 ```
 
 ## Quick start

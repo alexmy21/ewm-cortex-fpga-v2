@@ -23,7 +23,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use hllset_core::HLLSet;
-use hllset_materialize::{IngestSink, Ingestor};
+use crate::ingest::{IngestSink, Ingestor};
 
 use crate::hllset_lut::{BitTf, HllsetLut};
 use crate::object::{Commit, Gx, Object, ObjectId};

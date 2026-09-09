@@ -10,10 +10,14 @@
 //! exactly as the reference `TfLut.observe` does); only the output passes
 //! through `gate_TF`. Out-of-vocab ids are reported as leaks, never hidden.
 
-use ewm_core::{token_in_bytes, token_to_position, ModuleKind, TokenId, BITS_PER_REG};
+use ewm_core::{
+    token_in_bytes, token_to_position, ModuleKind, NodeId, PortId, TokenId, BITS_PER_REG,
+};
 use ewm_dsl::{NodeKind, Pipeline, PipelineBuilder};
-use ewm_hostif::{ModuleEdge, ModuleGraphSpec, ModuleNodeSpec};
-use ewm_modules::{validate_graph, ModuleRegistry, Packet, Stream};
+use ewm_hostif::{
+    ModuleCommand, ModuleDriver, ModuleEdge, ModuleGraphSpec, ModuleNodeSpec, ModuleResponse,
+};
+use ewm_modules::{validate_graph, Packet};
 
 /// Comma-separated id list (wire config encoding).
 pub fn csv(ids: &[TokenId]) -> String {
@@ -103,12 +107,12 @@ pub fn run_cortex_pipeline(
     };
     validate_graph(&spec).map_err(|e| e.to_string())?;
 
-    let registry = ModuleRegistry::new();
-    let mut slice = registry
-        .build(ModuleKind::Slice, &spec.nodes[0].config)
-        .map_err(|e| e.to_string())?;
-    let mut gate = registry
-        .build(ModuleKind::Gate, &spec.nodes[1].config)
+    // The bridge is the execution backend: the cortex submits wire commands
+    // to a `ModuleDriver` and drains responses. No module is ever stepped
+    // directly from here (separation contract §5).
+    let mut driver = ewm_sim::SimModuleDriver::new();
+    driver
+        .submit(ModuleCommand::Configure { spec })
         .map_err(|e| e.to_string())?;
 
     // Document HLLSet: active bit positions under the tid inscription.
@@ -122,27 +126,35 @@ pub fn run_cortex_pipeline(
     positions.sort_unstable();
     positions.dedup();
 
-    let mut slice_in = vec![Stream {
-        data: Packet {
-            ids: positions,
-            values: Vec::new(),
-        },
-        valid: true,
-        ready: false,
-    }];
-    let slice_out = slice.step(&mut slice_in).map_err(|t| t.message)?;
-    let materialized_ids = slice_out[0].data.ids.clone();
+    driver
+        .submit(ModuleCommand::Feed {
+            node: 0,
+            port: 0,
+            packet: Packet {
+                ids: positions,
+                values: Vec::new(),
+            },
+        })
+        .map_err(|e| e.to_string())?;
+    driver
+        .submit(ModuleCommand::Step { node: 0 })
+        .map_err(|e| e.to_string())?;
+    let materialized_ids = take_output(&mut driver, 0, 0)?;
 
-    let mut gate_in = vec![Stream {
-        data: Packet {
-            ids: materialized_ids.clone(),
-            values: Vec::new(),
-        },
-        valid: true,
-        ready: false,
-    }];
-    let gate_out = gate.step(&mut gate_in).map_err(|t| t.message)?;
-    let restored_ids = gate_out[0].data.ids.clone();
+    driver
+        .submit(ModuleCommand::Feed {
+            node: 1,
+            port: 0,
+            packet: Packet {
+                ids: materialized_ids.clone(),
+                values: Vec::new(),
+            },
+        })
+        .map_err(|e| e.to_string())?;
+    driver
+        .submit(ModuleCommand::Step { node: 1 })
+        .map_err(|e| e.to_string())?;
+    let restored_ids = take_output(&mut driver, 1, 0)?;
 
     let leaks: Vec<TokenId> = materialized_ids
         .iter()
@@ -155,6 +167,28 @@ pub fn run_cortex_pipeline(
         restored_ids,
         leaks,
     })
+}
+
+/// Drain the bridge driver and take the first output on `(node, port)`.
+fn take_output(
+    driver: &mut ewm_sim::SimModuleDriver,
+    node: NodeId,
+    port: PortId,
+) -> Result<Vec<TokenId>, String> {
+    let responses = driver.drain().map_err(|e| e.to_string())?;
+    for response in responses {
+        if let ModuleResponse::Output {
+            node: n,
+            port: p,
+            packet,
+        } = response
+        {
+            if n == node && p == port {
+                return Ok(packet.ids);
+            }
+        }
+    }
+    Err(format!("no output on node {node} port {port}"))
 }
 
 /// The LUT-view of a pass: the materialized (active) vocabulary, as a

@@ -8,4 +8,5 @@ description = "HLLSet K-storage for attention: KStorage trait over TokenLUT/Cata
 
 [dependencies]
 hllset-core = { workspace = true }
-hllset-materialize = { workspace = true }
+hllset-lut = { workspace = true }
+hllset-morphisms = { workspace = true }

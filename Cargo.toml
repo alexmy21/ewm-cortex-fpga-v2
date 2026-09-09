@@ -13,19 +13,26 @@ license = "MIT"
 cortex-core = { path = "crates/cortex-core" }
 ewm-git = { path = "crates/ewm-git" }
 hllset-attn = { path = "crates/hllset-attn" }
-hllset-core = { path = "crates/hllset-core" }
-hllset-materialize = { path = "crates/hllset-materialize" }
 hllset-repro = { path = "crates/hllset-repro" }
 cortex-fpga = { path = "crates/cortex-fpga" }
 lut-view = { path = "crates/lut-view" }
 context-tree = { path = "crates/context-tree" }
 
+# ── hllset-next-v2 foundation (de-vendored: the vendored copies are gone) ──
+hllset-core = { path = "../hllset-next-v2/crates/hllset-core" }
+hllset-contracts = { path = "../hllset-next-v2/crates/hllset-contracts" }
+hllset-lut = { path = "../hllset-next-v2/crates/hllset-lut" }
+hllset-morphisms = { path = "../hllset-next-v2/crates/hllset-morphisms" }
+hllset-ranks = { path = "../hllset-next-v2/crates/hllset-ranks" }
+hllset-cid = { path = "../hllset-next-v2/crates/hllset-cid" }
+
 # ── ewm-fpga-bridge (path deps: this copy intentionally breaks the
 #    self-containment of ewm-cortex to consume the bridge) ──
-ewm-core = { path = "../ewm-fpga-bridge/crates/ewm-core" }
-ewm-dsl = { path = "../ewm-fpga-bridge/crates/ewm-dsl" }
-ewm-hostif = { path = "../ewm-fpga-bridge/crates/ewm-hostif" }
-ewm-modules = { path = "../ewm-fpga-bridge/crates/ewm-modules" }
+ewm-core = { path = "../ewm-fpga-bridge-v2/crates/ewm-core" }
+ewm-dsl = { path = "../ewm-fpga-bridge-v2/crates/ewm-dsl" }
+ewm-hostif = { path = "../ewm-fpga-bridge-v2/crates/ewm-hostif" }
+ewm-modules = { path = "../ewm-fpga-bridge-v2/crates/ewm-modules" }
+ewm-sim = { path = "../ewm-fpga-bridge-v2/crates/ewm-sim" }
 
 # ── External (crates.io only) ──
 murmur3 = "0.5"

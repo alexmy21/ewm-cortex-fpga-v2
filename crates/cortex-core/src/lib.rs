@@ -14,13 +14,26 @@
 //! - [`gate`] — `gate_TF` output TokenGate (decoder-vocabulary limit) + exact membership
 //! - [`lut`] — monotonic TF reverse index (collection intersection per bit; TF only on collision ties)
 //! - [`pipeline`] — the [`CortexPipeline`] black box
+//! - [`context`] — the grow-only [`ContextMatrix`] (moved from the bridge;
+//!   the authoritative memory of the cortex, per the separation contract)
+//! - [`grounding`] — the τ/ρ grounding verdict over the matrix
+//! - [`role`] — the expert/leader role flag and the leader's registry+merge
 
+/// The LLM token id — the cortex-side vocabulary type.
+pub type TokenId = u32;
+
+pub mod context;
 pub mod encoding;
 pub mod gate;
+pub mod grounding;
 pub mod lut;
 pub mod pipeline;
+pub mod role;
 
+pub use context::ContextMatrix;
 pub use encoding::{tid, SimCodec};
 pub use gate::Gate;
+pub use grounding::{recommend, recommend_with, GroundingConfig, GroundingReport};
 pub use lut::TfLut;
 pub use pipeline::{CortexPipeline, PipelineResult};
+pub use role::{CortexConfig, Leader, Role};

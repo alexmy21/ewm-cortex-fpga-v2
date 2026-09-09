@@ -1,23 +1,23 @@
-//! K-storage: the LUTs as the K side of attention.
+//! K-storage: the LUTs as the K side of attention (de-vendored).
 //!
 //! A [`KStorage`] resolves tokens to [`KeyRef`]s (the K direction) and
 //! HLLSets to candidate tokens (the V direction), with a coverage gauge
-//! [`KStorage::confidence`]. The two provided storages are thin wrappers
-//! over the existing `hllset-dsl` LUTs:
+//! [`KStorage::confidence`]. The two provided storages are built on the
+//! `hllset-next-v2` foundation:
 //!
-//! - [`TokenLutStorage`] — tier 1, single-seed, ordered streams.
-//! - [`CatalogLutStorage`] — tier 2, multi-seed quorum, unordered streams.
+//! - [`TokenLutStorage`] — tier 1, single-seed, over `hllset-lut::LutIndex`.
+//! - [`CatalogLutStorage`] — tier 2, multi-seed quorum, over a local
+//!   per-seed catalog (consensus implemented here; the foundation keeps the
+//!   single morphism, the quorum is an application-level decision).
 
 use hllset_core::core::hashing::{
     hash_to_position, murmur3_hash, murmur3_hash_seeded, token_to_position,
     token_to_position_seeded,
 };
 use hllset_core::{BITS_PER_REG, HLLSet};
-use hllset_materialize::{
-    materialize_homogeneous_consensus, materialize_inlut, CatalogLUT, TokenLUT,
-};
+use hllset_lut::LutIndex;
 
-/// Default catalog seeds (G1 convention), mirroring `hllset-materialize`.
+/// Default catalog seeds (G1 convention).
 pub const DEFAULT_CATALOG_SEEDS: [u64; 3] = [0, 1, 2];
 
 /// A key reference into the HLLSet realm.
@@ -72,33 +72,26 @@ pub trait KStorage {
 
     /// Resolve a content address (murmur3 seed-0 hash) back to token bytes,
     /// if the token is registered in the LUT.
-    ///
-    /// This is the boundary crossing from the HLLSet realm back to the token
-    /// realm. Masks reference tokens by hash; bytes exist only in the LUT.
     fn resolve(&self, hash: u64) -> Option<Vec<u8>>;
 }
 
 // ── Tier 1: TokenLutStorage ────────────────────────────────────────────────
 
-/// Tier-1 K-storage over [`TokenLUT`] (single-seed, ordered streams).
-///
-/// `key_of` computes the `<reg, tz>` decomposition directly from the hash;
-/// this coincides with `TokenLUT.forward` for every registered token and is
-/// total (defined for unregistered tokens too). The LUT itself serves the
-/// V direction (`candidates`) and the coverage gauge (`confidence`).
+/// Tier-1 K-storage over the foundation `LutIndex` (single-seed, ordered
+/// streams).
 #[derive(Clone, Debug, Default)]
 pub struct TokenLutStorage {
-    lut: TokenLUT,
+    lut: LutIndex,
 }
 
 impl TokenLutStorage {
     /// Create an empty storage.
     pub fn new() -> Self {
-        Self { lut: TokenLUT::new() }
+        Self::default()
     }
 
     /// Wrap an existing LUT.
-    pub fn from_lut(lut: TokenLUT) -> Self {
+    pub fn from_lut(lut: LutIndex) -> Self {
         Self { lut }
     }
 
@@ -108,31 +101,32 @@ impl TokenLutStorage {
         I: IntoIterator<Item = B>,
         B: AsRef<[u8]>,
     {
-        let mut lut = TokenLUT::new();
-        lut.insert_all(tokens);
+        let mut lut: LutIndex = LutIndex::default();
+        for token in tokens {
+            lut.insert_token(token.as_ref().to_vec());
+        }
         Self { lut }
     }
 
     /// Register a token in the LUT (idempotent).
     pub fn insert(&mut self, token: Vec<u8>) {
-        if self.lut.position_of(&token).is_none() {
-            self.lut.insert(token);
-        }
+        self.lut.insert_token(token);
     }
 
     /// Access the underlying LUT.
-    pub fn lut(&self) -> &TokenLUT {
+    pub fn lut(&self) -> &LutIndex {
         &self.lut
     }
 
     /// Consume and return the underlying LUT.
-    pub fn into_lut(self) -> TokenLUT {
+    pub fn into_lut(self) -> LutIndex {
         self.lut
     }
 
     /// Whether the token is registered in the LUT.
     pub fn registered(&self, token: &[u8]) -> bool {
-        self.lut.position_of(token).is_some()
+        let (reg, zeros) = token_to_position(token);
+        !self.lut.fiber(reg * BITS_PER_REG + zeros).is_empty()
     }
 }
 
@@ -143,11 +137,13 @@ impl KStorage for TokenLutStorage {
     }
 
     fn candidates(&self, hllset: &HLLSet) -> Vec<Vec<u8>> {
-        materialize_inlut(hllset, &self.lut).flat_tokens()
+        self.lut.materialize(hllset).into_iter().collect()
     }
 
     fn confidence(&self, hllset: &HLLSet) -> f64 {
-        confidence_by_bit(hllset, |reg, zeros| self.lut.get(reg, zeros).is_some())
+        confidence_by_bit(hllset, |reg, zeros| {
+            !self.lut.fiber(reg * BITS_PER_REG + zeros).is_empty()
+        })
     }
 
     fn register(&mut self, token: Vec<u8>) {
@@ -157,25 +153,19 @@ impl KStorage for TokenLutStorage {
     fn resolve(&self, hash: u64) -> Option<Vec<u8>> {
         let (reg, zeros) = hash_to_position(hash);
         self.lut
-            .get(reg, zeros)?
-            .iter()
+            .fiber(reg * BITS_PER_REG + zeros)
+            .into_iter()
             .find(|t| murmur3_hash(t) == hash)
-            .cloned()
     }
 }
 
 // ── Tier 2: CatalogLutStorage ──────────────────────────────────────────────
 
-/// Tier-2 K-storage over [`CatalogLUT`] (multi-seed quorum, unordered
-/// streams).
-///
-/// `key_of` returns one cell per seed plus the consensus quorum
-/// (`max(1, seeds - 1)`, i.e. ≥ 2 of 3 by default). `candidates` uses
-/// homogeneous consensus; `confidence` uses the same per-bit resolution
-/// gauge as tier 1.
+/// Tier-2 K-storage: a local multi-seed catalog with quorum consensus
+/// (unordered streams).
 #[derive(Clone, Debug)]
 pub struct CatalogLutStorage {
-    lut: CatalogLUT,
+    values: Vec<Vec<u8>>,
     seeds: Vec<u64>,
 }
 
@@ -189,7 +179,7 @@ impl CatalogLutStorage {
     /// Create an empty storage with the default seeds `[0, 1, 2]`.
     pub fn new() -> Self {
         Self {
-            lut: CatalogLUT::new(),
+            values: Vec::new(),
             seeds: DEFAULT_CATALOG_SEEDS.to_vec(),
         }
     }
@@ -198,7 +188,7 @@ impl CatalogLutStorage {
     pub fn with_seeds(seeds: &[u64]) -> Self {
         assert!(seeds.len() >= 2, "need at least 2 seeds for consensus");
         Self {
-            lut: CatalogLUT::new().with_seeds(seeds),
+            values: Vec::new(),
             seeds: seeds.to_vec(),
         }
     }
@@ -209,24 +199,18 @@ impl CatalogLutStorage {
         I: IntoIterator<Item = B>,
         B: AsRef<[u8]>,
     {
-        let mut lut = CatalogLUT::new();
-        lut.insert_all(values);
-        Self {
-            lut,
-            seeds: DEFAULT_CATALOG_SEEDS.to_vec(),
+        let mut storage = Self::new();
+        for value in values {
+            storage.insert(value.as_ref().to_vec());
         }
+        storage
     }
 
     /// Register a value in the LUT (idempotent).
     pub fn insert(&mut self, value: Vec<u8>) {
-        if self.lut.positions_of(&value).is_none() {
-            self.lut.insert(value);
+        if !self.values.contains(&value) {
+            self.values.push(value);
         }
-    }
-
-    /// Access the underlying LUT.
-    pub fn lut(&self) -> &CatalogLUT {
-        &self.lut
     }
 
     /// The seeds used by this storage.
@@ -234,9 +218,31 @@ impl CatalogLutStorage {
         &self.seeds
     }
 
-    /// Consume and return the underlying LUT.
-    pub fn into_lut(self) -> CatalogLUT {
-        self.lut
+    /// The registered values.
+    pub fn values(&self) -> &[Vec<u8>] {
+        &self.values
+    }
+
+    fn quorum(&self) -> usize {
+        std::cmp::max(1, self.seeds.len() - 1)
+    }
+
+    fn seed0_candidates(&self, reg: u32, zeros: u32) -> Vec<Vec<u8>> {
+        self.candidates_at(reg, zeros)
+    }
+
+    /// Candidates registered at `(reg, zeros)` under **any** seed.
+    fn candidates_at(&self, reg: u32, zeros: u32) -> Vec<Vec<u8>> {
+        self.values
+            .iter()
+            .filter(|v| {
+                self.seeds.iter().any(|&seed| {
+                    let (r, z) = hash_to_position(murmur3_hash_seeded(v, seed));
+                    r == reg && z == zeros
+                })
+            })
+            .cloned()
+            .collect()
     }
 }
 
@@ -250,16 +256,32 @@ impl KStorage for CatalogLutStorage {
                 reg * BITS_PER_REG + zeros
             })
             .collect();
-        let quorum = std::cmp::max(1, self.seeds.len() - 1);
-        KeyRef::Cells(cells, quorum)
+        KeyRef::Cells(cells, self.quorum())
     }
 
     fn candidates(&self, hllset: &HLLSet) -> Vec<Vec<u8>> {
-        materialize_homogeneous_consensus(hllset, &self.lut).flat_tokens()
+        let quorum = self.quorum();
+        let mut out = Vec::new();
+        for value in &self.values {
+            let hits = self
+                .seeds
+                .iter()
+                .filter(|&&seed| {
+                    let (reg, zeros) = token_to_position_seeded(value, seed);
+                    hllset.bitmap().contains(reg * BITS_PER_REG + zeros)
+                })
+                .count();
+            if hits >= quorum {
+                out.push(value.clone());
+            }
+        }
+        out
     }
 
     fn confidence(&self, hllset: &HLLSet) -> f64 {
-        confidence_by_bit(hllset, |reg, zeros| self.lut.get(reg, zeros).is_some())
+        confidence_by_bit(hllset, |reg, zeros| {
+            !self.seed0_candidates(reg, zeros).is_empty()
+        })
     }
 
     fn register(&mut self, value: Vec<u8>) {
@@ -267,11 +289,7 @@ impl KStorage for CatalogLutStorage {
     }
 
     fn resolve(&self, hash: u64) -> Option<Vec<u8>> {
-        // Mask addresses are seed-0 G1 addresses; catalog storages with
-        // custom seeds should include seed 0 for mask compatibility.
-        let (reg, zeros) = hash_to_position(hash);
-        self.lut
-            .get(reg, zeros)?
+        self.values
             .iter()
             .find(|v| murmur3_hash_seeded(v, 0) == hash)
             .cloned()

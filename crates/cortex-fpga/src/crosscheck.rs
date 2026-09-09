@@ -68,16 +68,16 @@ mod tests {
     }
 
     #[test]
-    fn inlut_recovery_matches_vendored_materialize() {
-        use hllset_core::HLLSet;
-        use hllset_materialize::{materialize_inlut, TokenLUT};
+    fn inlut_recovery_matches_foundation_materialize() {
+        use hllset_morphisms::{materialize, Ingest};
 
         let tokens: Vec<Vec<u8>> = FIXTURE_IDS.iter().map(|&id| tid(id)).collect();
 
-        // Vendored reference: TokenLUT + HLLSet under the tid inscription.
-        let vendored_lut = TokenLUT::from_tokens(tokens.iter());
-        let hllset = HLLSet::from_tokens(tokens.iter());
-        let vendored_out = materialize_inlut(&hllset, &vendored_lut).flat_tokens();
+        // Foundation: complete ingest (seed 0 path) + LUT-first materialization.
+        let mut ingest: Ingest = Ingest::new();
+        ingest.ingest_tokens(tokens.iter().map(|t| t.as_slice()));
+        let sketch = ingest.hllset(0).clone();
+        let foundation_out = materialize(&[(&sketch, ingest.lut(0))], ingest.tf());
 
         // Bridge golden model: InLUT keyed with the same tid bytes.
         let mut bridge_lut = InLut::new();
@@ -90,13 +90,13 @@ mod tests {
             .collect();
         let bridge_out = slice_positions_with(&positions, &bridge_lut, parse_token_id).ids;
 
-        let mut vendored_ids: Vec<TokenId> =
-            vendored_out.iter().map(|t| parse_tid(t)).collect();
-        vendored_ids.sort_unstable();
+        let mut foundation_ids: Vec<TokenId> =
+            foundation_out.iter().map(|t| parse_tid(t)).collect();
+        foundation_ids.sort_unstable();
         let mut bridge_ids = bridge_out.clone();
         bridge_ids.sort_unstable();
 
-        assert_eq!(bridge_ids, vendored_ids, "InLUT recovery diverges");
+        assert_eq!(bridge_ids, foundation_ids, "InLUT recovery diverges");
         assert_eq!(bridge_ids.len(), FIXTURE_IDS.len(), "collision-free fixture");
     }
 

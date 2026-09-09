@@ -56,8 +56,10 @@ dependencies = [
  "ewm-git",
  "ewm-hostif",
  "ewm-modules",
+ "ewm-sim",
  "hllset-core",
- "hllset-materialize",
+ "hllset-lut",
+ "hllset-morphisms",
  "lut-view",
 ]
 
@@ -94,7 +96,7 @@ dependencies = [
 name = "ewm-core"
 version = "0.1.0"
 dependencies = [
- "murmur3",
+ "hllset-contracts",
 ]
 
 [[package]]
@@ -109,7 +111,8 @@ name = "ewm-git"
 version = "0.3.0"
 dependencies = [
  "hllset-core",
- "hllset-materialize",
+ "hllset-lut",
+ "hllset-morphisms",
 ]
 
 [[package]]
@@ -128,25 +131,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "fpga-fabric"
+name = "ewm-sim"
 version = "0.1.0"
 dependencies = [
- "thiserror",
+ "ewm-core",
+ "ewm-hostif",
+ "ewm-modules",
 ]
-
-[[package]]
-name = "fpga-hllset"
-version = "0.1.0"
-dependencies = [
- "fpga-fabric",
- "fpga-hostif",
- "murmur3",
- "roaring",
-]
-
-[[package]]
-name = "fpga-hostif"
-version = "0.1.0"
 
 [[package]]
 name = "generic-array"
@@ -169,28 +160,44 @@ name = "hllset-attn"
 version = "0.3.0"
 dependencies = [
  "hllset-core",
- "hllset-materialize",
+ "hllset-lut",
+ "hllset-morphisms",
 ]
 
 [[package]]
-name = "hllset-core"
-version = "0.3.0"
+name = "hllset-contracts"
+version = "0.2.0"
 dependencies = [
  "hex",
  "murmur3",
- "roaring",
- "serde",
- "serde_json",
  "sha1",
 ]
 
 [[package]]
-name = "hllset-materialize"
-version = "0.3.0"
+name = "hllset-core"
+version = "0.2.0"
 dependencies = [
- "fpga-hllset",
- "fpga-hostif",
+ "hllset-contracts",
+ "roaring",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hllset-lut"
+version = "0.2.0"
+dependencies = [
+ "hllset-contracts",
  "hllset-core",
+]
+
+[[package]]
+name = "hllset-morphisms"
+version = "0.2.0"
+dependencies = [
+ "hllset-contracts",
+ "hllset-core",
+ "hllset-lut",
 ]
 
 [[package]]
@@ -325,26 +332,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "thiserror"
-version = "2.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
-dependencies = [
- "thiserror-impl",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "2.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

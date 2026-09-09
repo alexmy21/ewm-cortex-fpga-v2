@@ -12,11 +12,13 @@ ewm-core = { workspace = true }
 ewm-dsl = { workspace = true }
 ewm-hostif = { workspace = true }
 ewm-modules = { workspace = true }
+ewm-sim = { workspace = true }
 
 # ── ewm-cortex first-party reference (bit-exact crosscheck) ──
 context-tree = { workspace = true }
 cortex-core = { workspace = true }
 ewm-git = { workspace = true }
 hllset-core = { workspace = true }
-hllset-materialize = { workspace = true }
+hllset-lut = { workspace = true }
+hllset-morphisms = { workspace = true }
 lut-view = { workspace = true }

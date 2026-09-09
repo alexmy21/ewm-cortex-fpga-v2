@@ -60,21 +60,20 @@ impl TfLut {
     /// byte order). The output is in bit order, not TF order.
     pub fn materialize(&self, hllset: &HLLSet) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
-        for (reg, zeros) in hllset.active_positions() {
-            if let Some(candidates) = self.storage.lut().get(reg, zeros) {
-                match candidates.as_slice() {
-                    [] => {}
-                    [single] => out.push(single.clone()),
-                    many => {
-                        // Collision group: TF disambiguates.
-                        let best = many.iter().min_by(|a, b| {
-                            self.tf(b)
-                                .cmp(&self.tf(a))
-                                .then_with(|| a.cmp(b))
-                        });
-                        if let Some(best) = best {
-                            out.push(best.clone());
-                        }
+        for addr in hllset.bit_addresses() {
+            let candidates: Vec<Vec<u8>> = self.storage.lut().fiber(addr.bit()).into_iter().collect();
+            match candidates.as_slice() {
+                [] => {}
+                [single] => out.push(single.clone()),
+                many => {
+                    // Collision group: TF disambiguates.
+                    let best = many.iter().min_by(|a, b| {
+                        self.tf(b)
+                            .cmp(&self.tf(a))
+                            .then_with(|| a.cmp(b))
+                    });
+                    if let Some(best) = best {
+                        out.push(best.clone());
                     }
                 }
             }

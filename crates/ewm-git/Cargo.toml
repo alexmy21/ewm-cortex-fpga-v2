@@ -8,4 +8,5 @@ description = "Minimal 2005-style Git as the content-addressed evolution store f
 
 [dependencies]
 hllset-core = { workspace = true }
-hllset-materialize = { workspace = true }
+hllset-lut = { workspace = true }
+hllset-morphisms = { workspace = true }
