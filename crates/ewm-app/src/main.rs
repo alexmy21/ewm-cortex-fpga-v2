@@ -73,15 +73,16 @@ fn main() {
     let mut source: Box<dyn TurnSource> = if mode == "ollama" {
         println!("token source : ollama run {model}");
         println!("prompt       : {prompt}");
+        println!("turns        : {turns}");
         Box::new(OllamaLlm::new(model, prompt, turns))
     } else {
         let scripted = parse_script(&script);
         println!("token source : deterministic stub");
         println!("script       : {script}");
+        println!("turns        : {}", scripted.len());
         Box::new(StubLlm::new(scripted))
     };
     println!("encoding     : {APP_ENCODING_NAME}");
-    println!("turns        : {turns}");
     println!();
 
     // The store is the stack memory; the head is the pointer (§10/§11).
