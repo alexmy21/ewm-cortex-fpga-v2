@@ -16,7 +16,7 @@ use crate::TokenId;
 use std::collections::{HashMap, VecDeque};
 
 /// The redesigned LLM context (nanoLM §4).
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ContextMatrix {
     nodes: Vec<TokenId>,
     index: HashMap<TokenId, usize>,

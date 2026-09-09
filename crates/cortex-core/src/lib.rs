@@ -23,6 +23,7 @@
 pub type TokenId = u32;
 
 pub mod context;
+pub mod context_unified;
 pub mod encoding;
 pub mod gate;
 pub mod grounding;
@@ -31,6 +32,7 @@ pub mod pipeline;
 pub mod role;
 
 pub use context::ContextMatrix;
+pub use context_unified::Context;
 pub use encoding::{tid, SimCodec};
 pub use gate::Gate;
 pub use grounding::{recommend, recommend_with, GroundingConfig, GroundingReport};

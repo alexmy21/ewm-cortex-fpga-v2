@@ -143,3 +143,22 @@ Each stage lands green (workspace tests + crosscheck) before the next begins.
 - Whether `lut-view` v1 (`LutView` vector) survives or is folded into
   `ViewRecord` only.
 - Final naming of the app crates (`cortex-context` vs extending `context-tree`).
+
+## Session status (2026-09-09) — stages executed
+
+- Stage 1 (cortex-context): `ContextMatrix` + grounding moved from the bridge
+  into `cortex-core`; the bridge's `GroundModule` is the config-driven wire
+  executor (Option A).
+- Stage 2: `SimModuleDriver` landed in `ewm-sim`; `cortex-fpga` submits
+  `ModuleCommand`s and drains `ModuleResponse`s — the cortex never steps a
+  module directly.
+- Stage 3 (de-vendor): `crates/hllset-core` + `crates/hllset-materialize`
+  deleted; all consumers point at `hllset-next-v2` (core/contracts/lut/
+  morphisms/ranks/cid). `ewm-git` gained a local `ingest` module on
+  `hllset-morphisms`; `hllset-attn::kstorage` rewritten over `hllset-lut`.
+- Stage 4 (unified Context): `cortex_core::Context` = context-tree +
+  `ContextMatrix` + `lut-view` views; immutable combinators (`with_*`,
+  `observe_sequence`, `join` = lattice join, `diff` = tree-level D/R/N,
+  `full_image_tokens`). `cortex-fpga::unified_context_for` builds it from a
+  working set. Roles landed (`Role`, `CortexConfig`, `Leader`).
+- Stage 5 (app crate grouping/naming): next.

@@ -67,6 +67,29 @@ pub fn context_tree_for(
     )
 }
 
+/// Build the unified [`cortex_core::Context`] for a working set: the tree,
+/// the grow-only follow matrix over each item's bigrams, and the full-image
+/// views. This is the one structure the cortex owns (stage 4).
+pub fn unified_context_for(
+    items: &[(&HLLSet, &[TokenId], &[(&str, &InLut)])],
+) -> cortex_core::Context {
+    let tree = context_tree_for(items);
+
+    let mut matrix = cortex_core::ContextMatrix::new();
+    for (_, ids, _) in items {
+        for w in ids.windows(2) {
+            matrix.observe(w[0], w[1], 1);
+        }
+    }
+
+    let views: Vec<lut_view::ViewRecord> = items
+        .iter()
+        .map(|(hset, ids, luts)| full_image(hset, ids, luts))
+        .collect();
+
+    cortex_core::Context::build(tree, matrix, views)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +192,31 @@ mod tests {
         assert_eq!(cv.departed.popcount(), departed.popcount());
         assert_eq!(cv.retained.popcount(), retained.popcount());
         assert_eq!(cv.new.popcount(), novel.popcount());
+    }
+
+    #[test]
+    fn unified_context_combines_tree_matrix_and_views() {
+        let lut_main = lut(0..8);
+        let lut_extra = lut(3..10);
+        let luts: &[(&str, &InLut)] = &[("main", &lut_main), ("extra", &lut_extra)];
+
+        let ha = hll(HA_IDS);
+        let hb = hll(HB_IDS);
+
+        let ctx = unified_context_for(&[(&ha, HA_IDS, luts), (&hb, HB_IDS, luts)]);
+
+        // Tree: one leaf per working-set item.
+        assert_eq!(ctx.tree().leaves().len(), 2);
+        // Matrix: the grow-only follow relation over each item's bigrams.
+        assert!(ctx.matrix().grounded(HA_IDS[1]));
+        assert!(ctx.matrix().grounded(HB_IDS[1]));
+        // Views: the full image of each item, deduplicated on join.
+        let tokens = ctx.full_image_tokens();
+        for id in HA_IDS.iter().chain(HB_IDS.iter()) {
+            assert!(tokens.contains(&tid(*id)), "missing token tid{id}");
+        }
+        // Joining the context with itself is the lattice idempotence.
+        assert_eq!(ctx.join(&ctx).tree().root(), ctx.tree().root());
     }
 }
 

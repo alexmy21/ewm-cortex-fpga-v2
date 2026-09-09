@@ -9,3 +9,5 @@ description = "Enhanced hllset-cortex pipeline: encoding IDs -> HLLSet -> gate_T
 [dependencies]
 hllset-core = { workspace = true }
 hllset-attn = { workspace = true }
+context-tree = { workspace = true }
+lut-view = { workspace = true }

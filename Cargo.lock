@@ -41,8 +41,10 @@ dependencies = [
 name = "cortex-core"
 version = "0.3.0"
 dependencies = [
+ "context-tree",
  "hllset-attn",
  "hllset-core",
+ "lut-view",
 ]
 
 [[package]]
